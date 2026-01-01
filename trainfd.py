@@ -42,7 +42,19 @@ def validate_batch(batch):
 
 if __name__ == '__main__':
     cfg = config.load_config('config/fd.yaml')
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    # Determine GPU device: respect CUDA_VISIBLE_DEVICES if set (remapped to 0..N-1),
+    # otherwise use the first id from config.hardware.gpu_ids.
+    gpu_ids = cfg.get('hardware', {}).get('gpu_ids', [0])
+    if torch.cuda.is_available():
+        if os.environ.get('CUDA_VISIBLE_DEVICES'):
+            dev = 0
+            print(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')} detected; using cuda:{dev}")
+        else:
+            dev = int(gpu_ids[0]) if isinstance(gpu_ids, (list, tuple)) and len(gpu_ids) > 0 else 0
+            print(f"Using configured GPU id: {dev}")
+        device = torch.device(f'cuda:{dev}')
+    else:
+        device = torch.device('cpu')
     print(f"Using device: {device}")
     
     cfg['training']['learning_rate'] = float(cfg['training'].get('learning_rate', 1e-4))
