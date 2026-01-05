@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/shashikant/.local/lib/python3.10/site-packages/pyemd/__init__.py", line 74, in <module>
+    from .emd import emd, emd_with_flow, emd_samples
+  File "src/pyemd/emd.pyx", line 1, in init pyemd.emd
+ValueError: numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject
+/home/shashikant/anaconda3/envs/deepfill/bin/python
+numpy 2.2.6

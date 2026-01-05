@@ -1,0 +1,9 @@
+Collecting pyemd
+  Using cached pyemd-1.0.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.6 kB)
+Collecting numpy>=1.9.0 (from pyemd)
+  Using cached numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (62 kB)
+Using cached pyemd-1.0.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (662 kB)
+Using cached numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (16.8 MB)
+Installing collected packages: numpy, pyemd
+
+Successfully installed numpy-2.2.6 pyemd-1.0.0

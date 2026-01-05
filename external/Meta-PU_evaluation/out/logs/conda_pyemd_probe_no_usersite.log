@@ -1,0 +1,5 @@
+/home/shashikant/anaconda3/envs/deepfill/lib/python3.10/site-packages/pyemd/__init__.py:74: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from .emd import emd, emd_with_flow, emd_samples
+exe /home/shashikant/anaconda3/envs/deepfill/bin/python
+numpy 1.26.4
+pyemd /home/shashikant/anaconda3/envs/deepfill/lib/python3.10/site-packages/pyemd/__init__.py

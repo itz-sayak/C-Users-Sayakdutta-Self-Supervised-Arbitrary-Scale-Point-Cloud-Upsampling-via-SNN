@@ -1,0 +1,60 @@
+CMake Deprecation Warning at CMakeLists.txt:5 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+-- The C compiler identification is GNU 9.5.0
+-- The CXX compiler identification is GNU 9.5.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found OpenMP_C: -fopenmp (found version "4.5")
+-- Found OpenMP_CXX: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5")
+CMake Warning at /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGALConfig.cmake:92 (message):
+  CGAL_DATA_DIR cannot be deduced, set the variable CGAL_DATA_DIR to set the
+  default value of CGAL::data_file_path()
+Call Stack (most recent call first):
+  CMakeLists.txt:16 (find_package)
+
+
+-- Using header-only CGAL
+-- Targetting Unix Makefiles
+-- Using /usr/bin/g++ compiler.
+-- Found GMP: /home/shashikant/anaconda3/envs/deepfill/lib/libgmp.so
+-- Found MPFR: /usr/lib/x86_64-linux-gnu/libmpfr.so
+CMake Warning (dev) at /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGAL_SetupBoost.cmake:20 (find_package):
+  Policy CMP0167 is not set: The FindBoost module is removed.  Run "cmake
+  --help-policy CMP0167" for policy details.  Use the cmake_policy command to
+  set the policy and suppress this warning.
+
+Call Stack (most recent call first):
+  /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGAL_SetupCGALDependencies.cmake:47 (include)
+  /usr/lib/x86_64-linux-gnu/cmake/CGAL/CGALConfig.cmake:153 (include)
+  CMakeLists.txt:16 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Found Boost: /usr/lib/x86_64-linux-gnu/cmake/Boost-1.74.0/BoostConfig.cmake (found suitable version "1.74.0", minimum required is "1.48")
+-- Boost include dirs: /usr/include
+-- Boost libraries:    
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Using gcc version 4 or later. Adding -frounding-math
+-- Build type: Release
+-- USING CXXFLAGS = '-fvisibility-inlines-hidden -std=c++17 -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe -isystem /home/shashikant/anaconda3/envs/deepfill/include  -I/home/shashikant/anaconda3/envs/deepfill/targets/x86_64-linux/include -fopenmp -O3 -DNDEBUG'
+-- USING EXEFLAGS = '-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,-rpath,/home/shashikant/anaconda3/envs/deepfill/lib -Wl,-rpath-link,/home/shashikant/anaconda3/envs/deepfill/lib -L/home/shashikant/anaconda3/envs/deepfill/lib  -L/home/shashikant/anaconda3/envs/deepfill/targets/x86_64-linux/lib -L/home/shashikant/anaconda3/envs/deepfill/targets/x86_64-linux/lib/stubs '
+-- Configuring done (0.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/zone/B/Fimproved/external/Meta-PU_evaluation/evaluation_code/build
