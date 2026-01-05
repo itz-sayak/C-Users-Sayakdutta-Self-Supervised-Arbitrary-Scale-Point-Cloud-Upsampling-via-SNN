@@ -9,6 +9,7 @@ from fd import config, datacore
 from fd.trainer import Trainer
 from fd.checkpoints import CheckpointIO
 import gc
+import argparse
 
 def check_memory(iteration):
     if torch.cuda.is_available():
@@ -41,18 +42,35 @@ def validate_batch(batch):
     return True
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Train FD model')
+    parser.add_argument('--multi_gpu', action='store_true', help='Use multiple GPUs with DataParallel')
+    parser.add_argument('--batch_size', type=int, default=None, help='Override batch size from config')
+    args = parser.parse_args()
+    
     cfg = config.load_config('config/fd.yaml')
+    
+    # Override batch size if specified
+    if args.batch_size is not None:
+        cfg['training']['batch_size'] = args.batch_size
+        print(f"Overriding batch size to: {args.batch_size}")
+    
     # Determine GPU device: respect CUDA_VISIBLE_DEVICES if set (remapped to 0..N-1),
     # otherwise use the first id from config.hardware.gpu_ids.
     gpu_ids = cfg.get('hardware', {}).get('gpu_ids', [0])
+    use_multi_gpu = args.multi_gpu and torch.cuda.device_count() > 1
+    
     if torch.cuda.is_available():
-        if os.environ.get('CUDA_VISIBLE_DEVICES'):
+        if use_multi_gpu:
+            print(f"Using multi-GPU training with {torch.cuda.device_count()} GPUs")
+            device = torch.device('cuda:0')
+        elif os.environ.get('CUDA_VISIBLE_DEVICES'):
             dev = 0
             print(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')} detected; using cuda:{dev}")
+            device = torch.device(f'cuda:{dev}')
         else:
             dev = int(gpu_ids[0]) if isinstance(gpu_ids, (list, tuple)) and len(gpu_ids) > 0 else 0
             print(f"Using configured GPU id: {dev}")
-        device = torch.device(f'cuda:{dev}')
+            device = torch.device(f'cuda:{dev}')
     else:
         device = torch.device('cpu')
     print(f"Using device: {device}")
@@ -117,6 +135,12 @@ if __name__ == '__main__':
     print("Initializing model...")
     model = config.get_model(cfg, device)
     
+    # Wrap model with DataParallel if using multi-GPU
+    if use_multi_gpu:
+        print(f"Wrapping model with DataParallel across {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+        print(f"Model is now on devices: {list(range(torch.cuda.device_count()))}")
+    
     nparameters = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total parameters: {nparameters:,}")
@@ -168,15 +192,17 @@ if __name__ == '__main__':
     print("Trainer initialized")
 
     use_amp = cfg['training']['use_amp'] and torch.cuda.is_available()
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
     if use_amp:
-        print("Mixed precision training (AMP) enabled")
+        print("Mixed precision training (AMP) enabled - saves memory & speeds up training")
+    else:
+        print("Mixed precision (AMP) disabled")
 
     checkpoint_io = CheckpointIO(out_dir, model=model, optimizer=optimizer)
 
     try:
-        load_dict = checkpoint_io.load('model.pt')
-        print("Checkpoint loaded successfully")
+        load_dict = checkpoint_io.load('model_best.pt')
+        print("Checkpoint loaded successfully from model_best.pt")
     except FileNotFoundError:
         load_dict = dict()
         print("No checkpoint found, starting from scratch")
@@ -187,6 +213,14 @@ if __name__ == '__main__':
     epoch_it = load_dict.get('epoch_it', 0)
     it = load_dict.get('it', 0)
     metric_val_best = load_dict.get('loss_val_best', np.inf)
+    
+    # Reset learning rate if it's too low (from old checkpoint)
+    current_lr = optimizer.param_groups[0]['lr']
+    if current_lr < 1e-6:
+        new_lr = cfg['training']['learning_rate']
+        print(f"WARNING: Learning rate too low ({current_lr:.2e}), resetting to {new_lr:.2e}")
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = new_lr
     
     print(f"Starting from epoch {epoch_it}, iteration {it}")
     print(f"Previous best validation loss: {metric_val_best:.6f}")
@@ -218,8 +252,10 @@ if __name__ == '__main__':
             print(f"\n--- Epoch {epoch_it}/{max_epochs} ---")
             epoch_start_time = time.time()
             
-            if hasattr(model, 'reset_states'):
-                model.reset_states()
+            # Handle DataParallel wrapper
+            model_module = model.module if hasattr(model, 'module') else model
+            if hasattr(model_module, 'reset_states'):
+                model_module.reset_states()
                 print("Reset SNN states")
             
             model.train()
@@ -238,7 +274,7 @@ if __name__ == '__main__':
                     optimizer.zero_grad()
                     
                     if use_amp:
-                        with torch.cuda.amp.autocast():
+                        with torch.amp.autocast('cuda'):
                             if hasattr(trainer, 'compute_loss_with_dict'):
                                 loss, loss_dict = trainer.compute_loss_with_dict(batch)
                             else:
@@ -326,8 +362,9 @@ if __name__ == '__main__':
                 if validate_every > 0 and (it % validate_every) == 0 and it > 0:
                     print(f'Running validation at iteration {it}...')
                     
-                    if hasattr(model, 'reset_states'):
-                        model.reset_states()
+                    model_module = model.module if hasattr(model, 'module') else model
+                    if hasattr(model_module, 'reset_states'):
+                        model_module.reset_states()
                     
                     if hasattr(trainer, 'evaluate_with_metrics'):
                         metric_val, val_metrics = trainer.evaluate_with_metrics(val_loader)

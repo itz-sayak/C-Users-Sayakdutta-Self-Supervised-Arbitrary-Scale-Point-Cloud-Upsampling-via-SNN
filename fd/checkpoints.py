@@ -93,7 +93,13 @@ class CheckpointIO(object):
         '''
         for k, v in self.module_dict.items():
             if k in state_dict:
-                v.load_state_dict(state_dict[k])
+                # Handle DataParallel 'module.' prefix
+                model_state = state_dict[k]
+                if any(key.startswith('module.') for key in model_state.keys()):
+                    # Strip 'module.' prefix from keys
+                    model_state = {key.replace('module.', '', 1): val 
+                                   for key, val in model_state.items()}
+                v.load_state_dict(model_state)
             else:
                 print(f'Warning: Could not find {k} in checkpoint!')
         scalars = {k: v for k, v in state_dict.items()

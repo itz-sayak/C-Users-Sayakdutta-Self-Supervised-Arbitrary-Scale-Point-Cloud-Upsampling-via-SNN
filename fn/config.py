@@ -138,8 +138,31 @@ def get_dataset(mode, cfg):
         'test': cfg['data']['test_split'],
     }
     split = splits[mode]
+    
+    # Check if using mesh-based dataset (PU1K)
+    use_mesh = cfg['data'].get('use_mesh', False)
+    
+    if use_mesh:
+        mesh_folder = cfg['data'].get('mesh_folder', '')
+        if not os.path.exists(mesh_folder):
+            raise FileNotFoundError(f"Mesh folder not found: {mesh_folder}")
+        
+        # Map split names
+        split_map = {'train': 'train', 'val': 'val', 'test': 'val'}
+        actual_split = split_map.get(split, 'train')
+        
+        dataset = datacore.PU1KMeshDataset(
+            mesh_folder=mesh_folder,
+            split=actual_split,
+            num_points=cfg['data'].get('pointcloud_n', 512),
+            num_patches=cfg['data'].get('patch_n', 64),
+            k_neighbors=cfg['data'].get('patch_k', 12),
+        )
+        print(f"Created {mode} PU1K mesh dataset with {len(dataset)} samples")
+        return dataset
+    
+    # Legacy folder-based dataset
     dataset_folder = cfg['data']['path']
-
     if not os.path.exists(dataset_folder):
         raise FileNotFoundError(f"Dataset folder not found: {dataset_folder}")
     

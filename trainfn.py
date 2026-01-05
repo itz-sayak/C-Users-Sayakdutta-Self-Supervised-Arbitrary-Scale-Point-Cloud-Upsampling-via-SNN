@@ -4,6 +4,7 @@ import numpy as np
 import os
 import time
 import warnings
+import argparse
 from tensorboardX import SummaryWriter
 from fn import config, datacore
 from fn.trainer import Trainer
@@ -14,8 +15,28 @@ import sys
 warnings.filterwarnings('ignore', category=UserWarning)
 
 if __name__ == '__main__':  
+    parser = argparse.ArgumentParser(description='Train FN model')
+    parser.add_argument('--multi_gpu', action='store_true', help='Use multiple GPUs with DataParallel')
+    parser.add_argument('--batch_size', type=int, default=None, help='Override batch size from config')
+    args = parser.parse_args()
+    
     cfg = config.load_config('config/fn.yaml')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Override batch size if specified
+    if args.batch_size is not None:
+        cfg['training']['batch_size'] = args.batch_size
+        print(f"Overriding batch size to: {args.batch_size}")
+    
+    use_multi_gpu = args.multi_gpu and torch.cuda.device_count() > 1
+    
+    if torch.cuda.is_available():
+        if use_multi_gpu:
+            print(f"Using multi-GPU training with {torch.cuda.device_count()} GPUs")
+            device = torch.device('cuda:0')
+        else:
+            device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
     print(f"Using device: {device}")
     
     seed = cfg.get('hardware', {}).get('seed', 42)
@@ -70,6 +91,12 @@ if __name__ == '__main__':
     )
 
     model = config.get_model(cfg, device)
+    
+    # Wrap model with DataParallel if using multi-GPU
+    if use_multi_gpu:
+        log_message(f"Wrapping model with DataParallel across {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
+        log_message(f"Model is now on devices: {list(range(torch.cuda.device_count()))}")
     
     optimizer_type = cfg['training'].get('optimizer', 'adam')
     lr = cfg['training'].get('lr', 1e-4)
@@ -226,7 +253,8 @@ if __name__ == '__main__':
         for batch_idx, batch in enumerate(train_loader):
             it += 1
             
-            if 'input' not in batch or batch['input'].shape[0] == 1:
+            # Skip invalid batches
+            if 'input' not in batch:
                 continue
             
             if state_reset_freq > 0 and it % state_reset_freq == 0:

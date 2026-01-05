@@ -30,6 +30,46 @@ def update_recursive(dict1, dict2):
     return dict1
 
 def get_dataset(mode, cfg):
+    # Check if using new HDF5-based dataset
+    use_hdf5 = cfg['data'].get('use_hdf5', False)
+    
+    if use_hdf5:
+        hdf5_paths = cfg['data'].get('hdf5_paths', {})
+        pugan_path = hdf5_paths.get('pugan', None)
+        pu1k_path = hdf5_paths.get('pu1k_train', None)
+        
+        # Make paths absolute if relative
+        data_base = cfg['data'].get('path', 'data')
+        if pugan_path and not pugan_path.startswith('/'):
+            pugan_path = pugan_path
+        if pu1k_path and not pu1k_path.startswith('/'):
+            pu1k_path = pu1k_path
+        
+        split = 'train' if mode == 'train' else 'val'
+        
+        input_key = cfg['data'].get('hdf5_input_key', 'poisson_256')
+        gt_key = cfg['data'].get('hdf5_gt_key', 'poisson_1024')
+        num_input = cfg['data'].get('num_input_points', 256)
+        num_gt = cfg['data'].get('num_gt_points', 1024)
+        k_neighbors = cfg['model'].get('k', 20)
+        
+        print(f"Loading HDF5 dataset for {mode}:")
+        print(f"  PUGAN: {pugan_path}")
+        print(f"  PU1K: {pu1k_path}")
+        
+        dataset = datacore.CombinedPU1KDataset(
+            pugan_path=pugan_path,
+            pu1k_path=pu1k_path,
+            split=split,
+            input_key=input_key,
+            gt_key=gt_key,
+            num_input_points=num_input,
+            num_gt_points=num_gt,
+            k_neighbors=k_neighbors
+        )
+        return dataset
+    
+    # Legacy folder-based dataset
     splits = {
         'train': cfg['data']['train_split'],
         'val': cfg['data']['val_split'],
@@ -56,6 +96,9 @@ def get_model(cfg, device):
     dropout = cfg['model'].get('dropout', 0.1)
     use_snn_decoder = cfg['model'].get('use_snn_decoder', False)
     
+    # New multi-scale parameters
+    k_scales = cfg['model'].get('k_scales', [10, 20, 40])
+    
     model_type = cfg['model'].get('type', 'enhanced')
     
     from fd import snn_coder
@@ -69,11 +112,12 @@ def get_model(cfg, device):
                 time_steps_dec=time_steps_dec,
                 num_heads=num_heads,
                 dropout=dropout,
-                use_snn_decoder=use_snn_decoder
+                use_snn_decoder=use_snn_decoder,
+                k_scales=k_scales  # Pass multi-scale k values
             )
             decoder_type = "SNN" if use_snn_decoder else "Standard"
             print(f"Created EnhancedSNNDistanceEstimation with {num_heads} heads, dropout={dropout}")
-            print(f"  - Encoder: SNN-based (temporal dynamics)")
+            print(f"  - Encoder: SNN-based with EIF in layers 0-1, k_scales={k_scales}")
             print(f"  - Decoder: {decoder_type}")
         except Exception as e:
             print(f"Warning: Could not create enhanced model: {e}")

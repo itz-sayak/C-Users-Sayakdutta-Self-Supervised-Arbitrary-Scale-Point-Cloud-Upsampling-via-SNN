@@ -17,12 +17,17 @@ class Trainer():
         if vis_dir is not None and not os.path.exists(vis_dir):
             os.makedirs(vis_dir)
 
+    def _get_model_module(self):
+        """Get underlying model, handling DataParallel wrapper."""
+        return self.model.module if hasattr(self.model, 'module') else self.model
+    
     def train_step(self, data):
         self.model.train()
         self.optimizer.zero_grad()
         
-        if hasattr(self.model, 'reset_states'):
-            self.model.reset_states()
+        model_module = self._get_model_module()
+        if hasattr(model_module, 'reset_states'):
+            model_module.reset_states()
         
         loss, loss_dict = self.compute_loss_with_dict(data)
         loss.backward()
@@ -36,8 +41,9 @@ class Trainer():
         total_metrics = {}
         num_batches = 0
         
-        if hasattr(self.model, 'reset_states'):
-            self.model.reset_states()
+        model_module = self._get_model_module()
+        if hasattr(model_module, 'reset_states'):
+            model_module.reset_states()
         
         for data in tqdm(val_loader):
             eval_loss, batch_metrics = self.eval_step_with_metrics(data)
@@ -73,7 +79,8 @@ class Trainer():
 
         with torch.no_grad():
             pred_distances = self.model(Xc_rotated)
-            loss, loss_dict = self.model.compute_loss(pred_distances, gt_distances)
+            model_module = self.model.module if hasattr(self.model, 'module') else self.model
+            loss, loss_dict = model_module.compute_loss(pred_distances, gt_distances)
 
         return loss
 
@@ -90,7 +97,8 @@ class Trainer():
 
         with torch.no_grad():
             pred_distances = self.model(Xc_rotated)
-            loss, loss_dict = self.model.compute_loss(pred_distances, gt_distances)
+            model_module = self.model.module if hasattr(self.model, 'module') else self.model
+            loss, loss_dict = model_module.compute_loss(pred_distances, gt_distances)
             
             metrics = self.calculate_metrics(pred_distances, gt_distances, loss_dict)
 
@@ -108,7 +116,8 @@ class Trainer():
             gt_distances = gt_distances.squeeze(-1)
 
         pred_distances = self.model(Xc_rotated)
-        loss, loss_dict = self.model.compute_loss(pred_distances, gt_distances)
+        model_module = self.model.module if hasattr(self.model, 'module') else self.model
+        loss, loss_dict = model_module.compute_loss(pred_distances, gt_distances)
 
         return loss
 
@@ -124,7 +133,10 @@ class Trainer():
             gt_distances = gt_distances.squeeze(-1)
 
         pred_distances = self.model(Xc_rotated)
-        loss, loss_dict = self.model.compute_loss(pred_distances, gt_distances)
+        
+        # Handle DataParallel wrapper
+        model_module = self.model.module if hasattr(self.model, 'module') else self.model
+        loss, loss_dict = model_module.compute_loss(pred_distances, gt_distances)
 
         return loss, loss_dict
 
@@ -147,13 +159,14 @@ class Trainer():
         self.model.eval()
         device = self.device
         
-        if hasattr(self.model, 'reset_states'):
-            self.model.reset_states()
+        model_module = self._get_model_module()
+        if hasattr(model_module, 'reset_states'):
+            model_module.reset_states()
 
         Xc_rotated = data.get('input').to(device).float()
 
         with torch.no_grad():
-            if return_uncertainty and hasattr(self.model, 'distance_decoder'):
+            if return_uncertainty and hasattr(model_module, 'distance_decoder'):
                 pred_distances, uncertainties = self.model(Xc_rotated)
                 return pred_distances, uncertainties
             else:
@@ -180,5 +193,6 @@ class Trainer():
             param_group['lr'] = lr
 
     def reset_model_states(self):
-        if hasattr(self.model, 'reset_states'):
-            self.model.reset_states()
+        model_module = self._get_model_module()
+        if hasattr(model_module, 'reset_states'):
+            model_module.reset_states()

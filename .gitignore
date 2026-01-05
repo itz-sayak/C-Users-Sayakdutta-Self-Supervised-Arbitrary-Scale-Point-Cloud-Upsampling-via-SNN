@@ -1,0 +1,29 @@
+# Ignore generated outputs and local artifacts
+out/
+testout/
+
+# Don't upload local GT or tmp eval copies
+out/tmp_eval/
+
+# Ignore large dataset and data folders
+data/
+sapcu/
+external/
+test/
+*.xyz
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pkl
+.pytest_cache/
+
+# Local env and configs
+.env
+.venv/
+venv/
+deepfill_environment.yml
+*.log
+
+# IDE
+.vscode/

@@ -1,0 +1,222 @@
+method: snn_normal_estimation
+
+data:
+  input_type: pointcloud
+  # Legacy folder-based config (unused when use_mesh=true)
+  path: data1/do_not_use_this_folder_content/ShapeNet
+  train_split: train
+  val_split: val
+  test_split: test
+  
+  # PU1K mesh-based dataset config
+  use_mesh: true
+  mesh_folder: data/PU1K/release/PU1K_raw_meshes/ShapeNetCore.v2.subsample
+  
+  # Point cloud settings
+  pointcloud_n: 512
+  patch_n: 64
+  patch_k: 12
+  pointcloud_noise: 0.002
+  
+  pointcloud_file: pointcloud.npz
+  fn_file: fn.npz
+  
+  normalize_points: true
+  normalize_scale: 0.85
+  normalize_center: true
+  normalize_clip: 5.0
+  
+  use_cache: true
+  cache_size: 800
+
+model:
+  type: 'ImprovedSNNNormalEstimation'
+  
+  # SNN architecture mode
+  use_snn_decoder: false
+  decoder_dropout: 0.1
+  
+  k_values: [24, 18, 12]
+  emb_dims: 640
+  time_steps_enc: 6
+  time_steps_dec: 9
+  num_heads: 8
+  d_model: 192
+  dropout: 0.1
+  
+  # Decoder
+  decoder_hidden_dims: [320, 192, 96]
+
+  snn_params:
+    membrane_decay_init: 0.88
+    threshold_adapt_init: 0.018
+    refractory_decay_init: 0.65
+    grad_width: 9.0
+    leak_grad_width: 9.0
+    reset_method: 'soft'
+    spike_function: 'sigmoid'
+
+  init_method: 'xavier_normal'
+  init_gain: 0.008
+  init_bias: 0.0
+
+training:
+  batch_size: 4
+  num_workers: 4
+  prefetch_factor: 2
+  
+  lr: 0.00018
+  lr_policy: 'cosine'
+  lr_decay: 0.96
+  lr_decay_step: 1500
+  min_lr: 1e-6
+  warmup_steps: 2000
+  warmup_factor: 0.01
+  
+  optimizer: 'adamw'
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  
+  grad_clip: 0.15
+  grad_clip_type: 'norm'
+  gradient_accumulation: 1
+  
+  max_iterations: 150000
+  max_epochs: 300
+  
+  print_every: 100
+  visualize_every: 5000
+  checkpoint_every: 2000
+  validate_every: 2000
+  backup_every: 30000
+  
+  early_stopping: true
+  patience: 15000
+  min_delta: 0.001
+  
+  use_amp: false
+  amp_opt_level: 'O1'
+  
+  gradient_checkpointing: true
+  
+  snn_training:
+    spike_rate_target: 0.06
+    spike_rate_weight: 0.001
+    state_reset_freq: 25
+    gradient_scaling: true
+    gradient_scale_factor: 0.6
+
+test:
+  model_file: 'model_best.pt'
+  batch_size: 8
+  num_samples: 200
+  metrics: ['angular_error']
+
+generation:
+  generation_dir: test
+  num_generate: 30
+  save_predictions: true
+  save_visualizations: false
+
+augmentation:
+  random_rotation: true
+  rotation_axis: 'z'
+  random_scale: false
+  scale_range: [1.0, 1.0]
+  random_jitter: true
+  jitter_sigma: 0.0015
+  jitter_clip: 0.015
+  random_translate: false
+  random_dropout: false
+  random_mask: false
+  normalize_each_batch: true
+  unit_sphere_normalize: true
+
+loss:
+  temperature: 0.15
+  alpha: 0.07
+  consistency_weight: 0.12
+  k_neighbors: 6
+  norm_regularization: true
+  norm_weight: 0.002
+  spike_rate_regularization: false
+  clip_loss: true
+  max_loss_value: 15.0
+  min_loss_value: 0.0
+
+monitoring:
+  use_tensorboard: true
+  log_dir: 'logs'
+  use_wandb: false
+  track_metrics: ['loss', 'angular_error', 'learning_rate', 'grad_norm']
+  visualize_samples: 2
+  save_visualizations: false
+  log_snn_stats: true
+  log_spike_rates: true
+
+checkpoint:
+  save_dir: 'checkpoints'
+  save_best: true
+  save_last: true
+  max_checkpoints: 4
+  resume: true
+  resume_file: 'model_best.pt'
+  pretrained: false
+  save_optimizer_state: true
+  save_scheduler_state: true
+
+hardware:
+  cudnn_benchmark: true
+  deterministic: false
+  seed: 42
+  pin_memory: true
+  non_blocking: true
+  gpu_ids: [0]
+  torch_compile: false
+  reduce_fragmentation: true
+  empty_cache_freq: 1000
+  max_split_size_mb: 32
+
+debug:
+  debug_mode: true
+  profile: false
+  check_nan: true
+  check_gradients: true
+  log_memory: true
+  memory_threshold_mb: 12000
+  log_memory_every: 200
+  validate_inputs: true
+  check_input_range: true
+  max_input_value: 20.0
+  min_input_value: -20.0
+
+stability:
+  use_gradient_accumulation: false
+  clip_gradients: true
+  gradient_clip_value: 0.15
+  gradient_clip_norm: 1.0
+  use_learning_rate_warmup: true
+  warmup_steps: 1500
+  use_learning_rate_decay: true
+  initialize_weights: true
+  weight_init_scale: 0.008
+  use_batch_norm: false
+  batch_norm_momentum: 0.1
+  use_dropout: true
+  dropout_rate: 0.1
+  dropout_inplace: false
+
+snn_stability:
+  clamp_membrane: true
+  membrane_min: -15.0
+  membrane_max: 15.0
+  soft_spikes_init: true
+  harden_spikes_epochs: 15
+  surrogate_gradient: 'sigmoid'
+  surrogate_scale: 8.0
+  reset_states_batch: true
+  reset_states_eval: true
+  monitor_spike_rates: true
+  target_spike_rate: 0.06
+  spike_rate_tolerance: 0.025

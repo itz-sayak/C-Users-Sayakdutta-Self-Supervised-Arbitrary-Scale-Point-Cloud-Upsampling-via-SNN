@@ -68,6 +68,7 @@ def get_graph_feature(x, k=20, idx=None):
     return feature.permute(0, 3, 1, 2).contiguous()
 
 class MultiTimeConstantLIFNeuron(nn.Module):
+    """Leaky Integrate-and-Fire neuron with learnable adaptive parameters."""
     def __init__(self, layer_size=None, membrane_decay_init=0.9, threshold_adapt_init=0.01,
                  refractory_decay_init=0.5, grad_width=10.0, device=None):
         super().__init__()
@@ -93,15 +94,17 @@ class MultiTimeConstantLIFNeuron(nn.Module):
     def forward(self, x, membrane=None, threshold=None, refractory=None):
         B = x.shape[0]
         C = x.shape[1]
+        device = x.device  # Always use input's device for DataParallel compatibility
 
         if self.membrane_decay is None:
-            device = x.device
             self.membrane_decay = nn.Parameter(torch.full((C,), self.membrane_decay_init, device=device))
             self.threshold_adapt = nn.Parameter(torch.full((C,), self.threshold_adapt_init, device=device))
             self.refractory_decay = nn.Parameter(torch.full((C,), self.refractory_decay_init, device=device))
             self.threshold_base = nn.Parameter(torch.ones(C, device=device))
 
         def expand_param(param, x):
+            # Move param to input's device for DataParallel compatibility
+            param = param.to(x.device)
             if x.dim() == 2:
                 return param.unsqueeze(0).expand_as(x)
             elif x.dim() == 3:
@@ -151,6 +154,126 @@ class MultiTimeConstantLIFNeuron(nn.Module):
         
         return spikes
 
+
+class MultiTimeConstantEIFNeuron(nn.Module):
+    """
+    Exponential Integrate-and-Fire (EIF) neuron with learnable adaptive parameters.
+    
+    EIF adds an exponential nonlinearity for sharper spike initiation,
+    better suited for detecting edges and local geometric features.
+    
+    Membrane dynamics:
+        V[t] = V[t-1] * decay + X[t] + delta_T * exp((V[t-1] - theta_rh) / delta_T)
+    """
+    def __init__(self, layer_size=None, membrane_decay_init=0.9, threshold_adapt_init=0.01,
+                 refractory_decay_init=0.5, delta_T_init=1.0, theta_rh_init=0.8,
+                 grad_width=10.0, device=None):
+        super().__init__()
+        self.layer_size = layer_size
+        self.membrane_decay_init = membrane_decay_init
+        self.threshold_adapt_init = threshold_adapt_init
+        self.refractory_decay_init = refractory_decay_init
+        self.delta_T_init = delta_T_init
+        self.theta_rh_init = theta_rh_init
+        self.grad_width = grad_width
+        
+        if layer_size is not None:
+            if device is None:
+                device = torch.device('cpu')
+            self.membrane_decay = nn.Parameter(torch.full((layer_size,), membrane_decay_init, device=device))
+            self.threshold_adapt = nn.Parameter(torch.full((layer_size,), threshold_adapt_init, device=device))
+            self.refractory_decay = nn.Parameter(torch.full((layer_size,), refractory_decay_init, device=device))
+            self.threshold_base = nn.Parameter(torch.ones(layer_size, device=device))
+            # EIF-specific learnable parameters
+            self.delta_T = nn.Parameter(torch.full((layer_size,), delta_T_init, device=device))
+            self.theta_rh = nn.Parameter(torch.full((layer_size,), theta_rh_init, device=device))
+        else:
+            self.membrane_decay = None
+            self.threshold_adapt = None
+            self.refractory_decay = None
+            self.threshold_base = None
+            self.delta_T = None
+            self.theta_rh = None
+
+    def forward(self, x, membrane=None, threshold=None, refractory=None):
+        B = x.shape[0]
+        C = x.shape[1]
+        device = x.device  # Always use input's device for DataParallel compatibility
+
+        if self.membrane_decay is None:
+            self.membrane_decay = nn.Parameter(torch.full((C,), self.membrane_decay_init, device=device))
+            self.threshold_adapt = nn.Parameter(torch.full((C,), self.threshold_adapt_init, device=device))
+            self.refractory_decay = nn.Parameter(torch.full((C,), self.refractory_decay_init, device=device))
+            self.threshold_base = nn.Parameter(torch.ones(C, device=device))
+            self.delta_T = nn.Parameter(torch.full((C,), self.delta_T_init, device=device))
+            self.theta_rh = nn.Parameter(torch.full((C,), self.theta_rh_init, device=device))
+
+        def expand_param(param, x):
+            # Move param to input's device for DataParallel compatibility
+            param = param.to(x.device)
+            if x.dim() == 2:
+                return param.unsqueeze(0).expand_as(x)
+            elif x.dim() == 3:
+                return param.unsqueeze(0).unsqueeze(-1).expand_as(x)
+            elif x.dim() == 4:
+                return param.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand_as(x)
+            else:
+                raise ValueError(f"Unsupported input shape: {x.shape}")
+
+        if membrane is None:
+            membrane = torch.zeros_like(x)
+        if threshold is None:
+            threshold = expand_param(self.threshold_base, x)
+        if refractory is None:
+            refractory = torch.zeros_like(x)
+
+        # Clamp parameters to valid ranges
+        membrane_decay = torch.clamp(self.membrane_decay, 0.1, 0.99)
+        threshold_adapt = torch.clamp(self.threshold_adapt, 0.001, 0.1)
+        refractory_decay = torch.clamp(self.refractory_decay, 0.1, 0.95)
+        delta_T = torch.clamp(self.delta_T, 0.1, 5.0)  # Sharpness parameter
+        theta_rh = torch.clamp(self.theta_rh, 0.1, 2.0)  # Rheobase threshold
+        
+        membrane_decay_expanded = expand_param(membrane_decay, x)
+        threshold_adapt_expanded = expand_param(threshold_adapt, x)
+        refractory_decay_expanded = expand_param(refractory_decay, x)
+        threshold_base_expanded = expand_param(self.threshold_base, x)
+        delta_T_expanded = expand_param(delta_T, x)
+        theta_rh_expanded = expand_param(theta_rh, x)
+
+        # EIF exponential term (clamped for numerical stability)
+        exp_arg = torch.clamp((membrane - theta_rh_expanded) / (delta_T_expanded + 1e-6), -5.0, 5.0)
+        exp_term = delta_T_expanded * torch.exp(exp_arg)
+
+        # Apply refractory gating
+        x = x * (refractory <= 0).float()
+        
+        # EIF membrane dynamics: adds exponential nonlinearity
+        membrane = membrane * membrane_decay_expanded * (1 - refractory) + x + exp_term
+        
+        # Spike generation
+        spikes = self.spike_function(membrane - threshold)
+        membrane = membrane * (1 - spikes)
+        refractory = refractory * refractory_decay_expanded + spikes
+        threshold = threshold + threshold_adapt_expanded * spikes
+        threshold = threshold_base_expanded + (threshold - threshold_base_expanded) * 0.95
+
+        return spikes, membrane, threshold, refractory
+
+    def spike_function(self, x):
+        x_clamped = torch.clamp(x, -10.0, 10.0)
+        
+        gaussian = torch.exp(-(x_clamped ** 2) / 2) / np.sqrt(2 * np.pi)
+        sigmoid = torch.sigmoid(self.grad_width * x_clamped)
+        
+        spikes = 0.5 * gaussian + 0.5 * sigmoid
+        
+        if self.training:
+            hard_spikes = (x > 0).float()
+            spikes = spikes + (hard_spikes - spikes).detach()
+        
+        return spikes
+
 class SNNStateManager:
     def __init__(self):
         self.reset()
@@ -167,14 +290,23 @@ class SNNStateManager:
                 'refractory': torch.zeros(shape, device=device, dtype=dtype)
             }
         else:
-            # Detach states to prevent backward through multiple batches
+            # Ensure states are on correct device (for DataParallel compatibility)
             state = self.states[layer_name]
             if state['membrane'] is not None:
-                state['membrane'] = state['membrane'].detach()
+                if state['membrane'].device != device or state['membrane'].shape != shape:
+                    state['membrane'] = torch.zeros(shape, device=device, dtype=dtype)
+                else:
+                    state['membrane'] = state['membrane'].detach().to(device)
             if state['refractory'] is not None:
-                state['refractory'] = state['refractory'].detach()
+                if state['refractory'].device != device or state['refractory'].shape != shape:
+                    state['refractory'] = torch.zeros(shape, device=device, dtype=dtype)
+                else:
+                    state['refractory'] = state['refractory'].detach().to(device)
             if state['threshold'] is not None:
-                state['threshold'] = state['threshold'].detach()
+                if state['threshold'].device != device or state['threshold'].shape != shape:
+                    state['threshold'] = None
+                else:
+                    state['threshold'] = state['threshold'].detach().to(device)
         return self.states[layer_name]
     
     def update_state(self, layer_name, new_state):
@@ -196,26 +328,46 @@ class TemporalIntegration(nn.Module):
         return torch.einsum('t, tbf -> bf', weights, temporal_features)
 
 class EnhancedTemporalSNN_DGCNN_fd(nn.Module):
-    def __init__(self, k=20, emb_dims=512, time_steps=5, num_scales=3):
+    def __init__(self, k=20, emb_dims=512, time_steps=5, num_scales=3, k_scales=[10, 20, 40]):
         super().__init__()
         self.k = k
         self.emb_dims = emb_dims
         self.time_steps = time_steps
+        self.k_scales = k_scales  # Multi-scale k values for feature extraction
         
         self.knn_cache = KNNCache()
         
         self.conv_blocks = nn.ModuleList()
         self.snn_blocks = nn.ModuleList()
         
+        # Multi-scale convolution for first block (aggregates features from different k scales)
+        self.multi_scale_first_conv = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(6, 64, 1, bias=False),
+                nn.BatchNorm2d(64),
+                nn.LeakyReLU(0.2)
+            ) for _ in k_scales
+        ])
+        self.scale_fusion = nn.Sequential(
+            nn.Conv1d(64 * len(k_scales), 64, 1, bias=False),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(0.2)
+        )
+        
+        # Block 0: EIF neuron for edge-aware feature extraction (early layer)
+        self.snn_blocks.append(MultiTimeConstantEIFNeuron(64, delta_T_init=1.0, theta_rh_init=0.8))
+        
+        # Block 1: EIF neuron (early layer, still benefit from edge detection)
         self.conv_blocks.append(nn.Sequential(
-            nn.Conv2d(6, 64, 1, bias=False),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(64*2, 128, 1, bias=False),
+            nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2)
         ))
-        self.snn_blocks.append(MultiTimeConstantLIFNeuron(64))
+        self.snn_blocks.append(MultiTimeConstantEIFNeuron(128, delta_T_init=1.0, theta_rh_init=0.8))
         
-        in_channels = 64
-        out_channels_list = [128, 256, 512]
+        # Block 2 & 3: LIF neurons for stable semantic features (later layers)
+        in_channels = 128
+        out_channels_list = [256, 512]
         
         for out_channels in out_channels_list:
             self.conv_blocks.append(nn.Sequential(
@@ -244,38 +396,79 @@ class EnhancedTemporalSNN_DGCNN_fd(nn.Module):
         B, _, M = x.shape
         device = x.device
         
-        if not self.training:
-            self.state_manager.reset()
-        
+        # For DataParallel compatibility, we manage states locally in forward
+        # instead of using the shared state_manager
         xyz = x.permute(0, 2, 1).contiguous()
-        knn_idx = self.knn_cache.get_knn(xyz, min(self.k, M), "encoder")
         
         temporal_features = []
+        
+        # Initialize states locally for this forward pass (DataParallel safe)
+        block_states = {}
         
         for t in range(self.time_steps):
             multi_scale_features = []
             
-            x_current = x
-            for block_idx, (conv_block, snn_block) in enumerate(zip(self.conv_blocks, self.snn_blocks)):
+            # Block 0: Multi-scale k feature extraction with EIF neuron
+            scale_features = []
+            for k_scale, conv in zip(self.k_scales, self.multi_scale_first_conv):
+                k_use = min(k_scale, M)
+                x_graph = get_graph_feature(x, k=k_use)
+                feat = conv(x_graph).max(dim=-1)[0]  # B, 64, M
+                scale_features.append(feat)
+            
+            # Fuse multi-scale features
+            x_fused = torch.cat(scale_features, dim=1)  # B, 64*3, M
+            x_conv = self.scale_fusion(x_fused)  # B, 64, M
+            
+            # Apply EIF neuron to block 0
+            state_name = "block_0"
+            if t == 0 or state_name not in block_states:
+                membrane, threshold, refractory = None, None, None
+            else:
+                membrane = block_states[state_name]['membrane']
+                threshold = block_states[state_name]['threshold']
+                refractory = block_states[state_name]['refractory']
+            
+            x_conv, membrane, threshold, refractory = self.snn_blocks[0](
+                x_conv,
+                membrane=membrane,
+                threshold=threshold,
+                refractory=refractory
+            )
+            block_states[state_name] = {
+                'membrane': membrane.detach(),
+                'threshold': threshold.detach() if threshold is not None else None,
+                'refractory': refractory.detach()
+            }
+            multi_scale_features.append(x_conv)
+            x_current = x_conv
+            
+            # Blocks 1-3: Standard processing (block 1 uses EIF, blocks 2-3 use LIF)
+            for block_idx, (conv_block, snn_block) in enumerate(zip(self.conv_blocks, self.snn_blocks[1:]), start=1):
                 x_graph = get_graph_feature(x_current, k=min(self.k, M))
                 
                 x_conv = conv_block(x_graph).max(dim=-1)[0]
                 
                 state_name = f"block_{block_idx}"
-                state = self.state_manager.get_state(state_name, x_conv.shape, device)
+                if t == 0 or state_name not in block_states:
+                    membrane, threshold, refractory = None, None, None
+                else:
+                    membrane = block_states[state_name]['membrane']
+                    threshold = block_states[state_name]['threshold']
+                    refractory = block_states[state_name]['refractory']
                 
                 x_conv, membrane, threshold, refractory = snn_block(
                     x_conv, 
-                    membrane=state['membrane'],
-                    threshold=state['threshold'],
-                    refractory=state['refractory']
+                    membrane=membrane,
+                    threshold=threshold,
+                    refractory=refractory
                 )
                 
-                self.state_manager.update_state(state_name, {
-                    'membrane': membrane,
-                    'threshold': threshold,
-                    'refractory': refractory
-                })
+                block_states[state_name] = {
+                    'membrane': membrane.detach(),
+                    'threshold': threshold.detach() if threshold is not None else None,
+                    'refractory': refractory.detach()
+                }
                 
                 multi_scale_features.append(x_conv)
                 x_current = x_conv
@@ -511,7 +704,9 @@ class StandardDistanceDecoder(nn.Module):
         )
         
         self.fc_distance = nn.Linear(32, 1)
-        self.activation = nn.ReLU()  # Ensure non-negative distances
+        # Use Softplus instead of ReLU to avoid dead neurons when output goes negative
+        # Softplus is smooth approximation of ReLU: log(1 + exp(x))
+        self.activation = nn.Softplus(beta=5.0)  # Higher beta makes it closer to ReLU but smooth
 
     def forward(self, x):
         """Forward pass through standard decoder"""
@@ -613,6 +808,9 @@ class EnhancedSNNDistanceEstimation(nn.Module):
     
     Architecture:
         - Encoder: EnhancedTemporalSNN_DGCNN_fd (with SNN temporal dynamics)
+                   Uses EIF neurons in layers 0-1 for edge detection
+                   Uses LIF neurons in layers 2-3 for semantic features
+                   Multi-scale k feature extraction
         - Decoder: StandardDistanceDecoder (conventional MLP, no SNN)
     
     This design concentrates the bio-inspired spiking computation in the
@@ -620,15 +818,17 @@ class EnhancedSNNDistanceEstimation(nn.Module):
     the final regression task.
     """
     def __init__(self, k=20, emb_dims=512, time_steps_enc=5, time_steps_dec=8,
-                 num_heads=4, dropout=0.1, use_snn_decoder=False):
+                 num_heads=4, dropout=0.1, use_snn_decoder=False, k_scales=[10, 20, 40]):
         super().__init__()
         self.use_snn_decoder = use_snn_decoder
         
         # SNN-based encoder for temporal feature extraction
+        # Now with EIF in early layers and multi-scale k
         self.encoder = EnhancedTemporalSNN_DGCNN_fd(
             k=k, 
             emb_dims=emb_dims, 
-            time_steps=time_steps_enc
+            time_steps=time_steps_enc,
+            k_scales=k_scales  # Multi-scale k values
         )
         
         # Standard (non-SNN) decoder - SNN processing done in encoder
