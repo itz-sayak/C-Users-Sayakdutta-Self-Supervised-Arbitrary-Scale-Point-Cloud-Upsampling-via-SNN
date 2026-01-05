@@ -8,7 +8,10 @@ out/tmp_eval/
 # Ignore large dataset and data folders
 data/
 sapcu/
-external/
+# Keep `external/` tracked but ignore virtualenvs inside it (venv, .venv, venv_eval, etc.)
+!external/
+external/**/venv*/
+external/**/venv*/**
 test/
 *.xyz
 
